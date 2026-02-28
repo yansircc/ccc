@@ -24,9 +24,9 @@ Path: `~/.config/ccc/config.json` (managed via `ccc provider` commands, no manua
       "args": ["--dangerously-skip-permissions"],
       "env": { "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1" }
     },
-    "deepseek": {
-      "base_url": "https://api.deepseek.com/anthropic",
-      "env": { "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat" }
+    "minimax": {
+      "base_url": "https://api.minimax.io/anthropic",
+      "env": { "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.5-highspeed" }
     }
   }
 }
