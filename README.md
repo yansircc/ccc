@@ -4,8 +4,26 @@ A lightweight wrapper for Claude Code with config-driven multi-provider switchin
 
 ## Install
 
+### From release (recommended)
+
 ```bash
-git clone https://github.com/yanxir/ccc.git
+# macOS Apple Silicon
+curl -Lo ccc https://github.com/yansircc/ccc/releases/latest/download/ccc-darwin-arm64
+chmod +x ccc && mv ccc ~/.local/bin/
+
+# macOS Intel
+curl -Lo ccc https://github.com/yansircc/ccc/releases/latest/download/ccc-darwin-amd64
+chmod +x ccc && mv ccc ~/.local/bin/
+
+# Linux amd64
+curl -Lo ccc https://github.com/yansircc/ccc/releases/latest/download/ccc-linux-amd64
+chmod +x ccc && mv ccc ~/.local/bin/
+```
+
+### From source
+
+```bash
+git clone https://github.com/yansircc/ccc.git
 cd ccc
 go build -o ccc .
 cp ccc ~/.local/bin/  # ensure it's in PATH and takes priority over claude
