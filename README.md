@@ -25,9 +25,11 @@ chmod +x ccc && mv ccc ~/.local/bin/
 ```bash
 git clone https://github.com/yansircc/ccc.git
 cd ccc
-go build -o ccc .
-cp ccc ~/.local/bin/  # ensure it's in PATH and takes priority over claude
+make install                 # installs to ~/.local/bin/ccc
+# or: make install PREFIX=/usr/local
 ```
+
+Ensure the install dir is in `PATH` and takes priority over any existing `claude` binary.
 
 ## Configuration
 
@@ -83,6 +85,7 @@ ccc token delete <provider>        # Delete
 ccc                        # Use default provider
 ccc --provider minimax     # Specify provider
 ccc --safe                 # Filter --dangerously-skip-permissions from provider args
+ccc -h                     # Show ccc's own help (wrapper flags + subcommands)
 ccc --version              # Info-only, skip provider setup, pass through directly
 ```
 
