@@ -8,6 +8,15 @@ import (
 )
 
 func main() {
+	// Top-level help: describe ccc's own interface, not claude's.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-h", "--help", "help":
+			printUsage(os.Stdout)
+			return
+		}
+	}
+
 	// Token subcommand
 	if len(os.Args) > 1 && os.Args[1] == "token" {
 		handleTokenCommand(os.Args[2:])
@@ -112,6 +121,31 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func printUsage(w *os.File) {
+	fmt.Fprint(w, `ccc — Claude Code Companion (config-driven wrapper)
+
+Usage:
+  ccc [--provider <name>] [--safe] [claude args...]
+  ccc <subcommand> ...
+
+Wrapper flags (consumed by ccc, not forwarded):
+  --provider <name>   Use the named provider (overrides default_provider)
+  --safe              Strip --dangerously-skip-permissions from provider args
+  -h, --help          Show this help
+
+Subcommands:
+  provider add|list|remove|set-default   Manage providers in config.json
+  token    set|get|list|delete           Manage tokens in macOS Keychain
+
+Pass-through:
+  Any other args are forwarded to the real claude binary. Provider setup is
+  skipped for info-only invocations (--version, update, doctor, mcp, config,
+  login, logout) and when ANTHROPIC_BASE_URL is already set.
+
+Config:  ~/.config/ccc/config.json
+`)
 }
 
 func isInfoOnlyInvocation(args []string) bool {
