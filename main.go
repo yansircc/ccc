@@ -66,17 +66,16 @@ func main() {
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch {
-		case arg == "--provider" || strings.HasPrefix(arg, "--provider="):
-			name := strings.TrimPrefix(arg, "--provider=")
-			if name == "" && i+1 < len(os.Args) {
-				name = os.Args[i+1]
+		case arg == "--provider":
+			if i+1 < len(os.Args) {
+				providerName = os.Args[i+1]
 				i++
-			}
-			if name == "" {
+			} else {
 				fmt.Fprintln(os.Stderr, "--provider requires a value")
 				os.Exit(2)
 			}
-			providerName = name
+		case strings.HasPrefix(arg, "--provider="):
+			providerName = strings.TrimPrefix(arg, "--provider=")
 		case arg == "--safe":
 			safe = true
 		default:
