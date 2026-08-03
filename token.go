@@ -88,7 +88,6 @@ func handleTokenCommand(args []string) {
 	}
 }
 
-
 func maskToken(s string) string {
 	if len(s) <= 8 {
 		return strings.Repeat("*", len(s))

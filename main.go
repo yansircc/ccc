@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -38,6 +39,8 @@ func main() {
 		}
 	}
 	os.Setenv("_CCC_WRAPPED", "1")
+	defer os.Unsetenv("_CCC_WRAPPED")
+	defer os.Unsetenv("_CCC_REAL_BIN")
 
 	// Load config
 	cfg, err := loadConfig()
@@ -61,16 +64,23 @@ func main() {
 	var userArgs []string
 
 	for i := 1; i < len(os.Args); i++ {
-		switch os.Args[i] {
-		case "--provider":
-			if i+1 < len(os.Args) {
-				providerName = os.Args[i+1]
+		arg := os.Args[i]
+		switch {
+		case arg == "--provider" || strings.HasPrefix(arg, "--provider="):
+			name := strings.TrimPrefix(arg, "--provider=")
+			if name == "" && i+1 < len(os.Args) {
+				name = os.Args[i+1]
 				i++
 			}
-		case "--safe":
+			if name == "" {
+				fmt.Fprintln(os.Stderr, "--provider requires a value")
+				os.Exit(2)
+			}
+			providerName = name
+		case arg == "--safe":
 			safe = true
 		default:
-			userArgs = append(userArgs, os.Args[i])
+			userArgs = append(userArgs, arg)
 		}
 	}
 
@@ -80,6 +90,18 @@ func main() {
 	}
 
 	infoOnly := isInfoOnlyInvocation(userArgs)
+
+	// Without a default provider and no external base URL, running ccc would
+	// silently pass through to claude with whatever settings.json still pins.
+	// Fail loudly instead of inheriting stale provider state.
+	if !infoOnly && providerName == "" && os.Getenv("ANTHROPIC_BASE_URL") == "" {
+		if len(cfg.Providers) > 0 {
+			fmt.Fprintf(os.Stderr, "No default provider configured.\n  Run: ccc provider set-default <name>\n")
+		} else {
+			fmt.Fprintln(os.Stderr, "No providers configured.\n  Run: ccc provider add <name> --base-url <url>")
+		}
+		os.Exit(2)
+	}
 
 	var finalArgs []string
 
@@ -164,4 +186,3 @@ func isInfoOnlyInvocation(args []string) bool {
 		return false
 	}
 }
-

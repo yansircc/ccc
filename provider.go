@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -36,6 +37,13 @@ func setupProvider(name string, cfg *config) error {
 	os.Setenv("ANTHROPIC_AUTH_TOKEN", token)
 	for k, v := range p.Env {
 		os.Setenv(k, v)
+	}
+
+	// Recent Claude Code versions give settings.json env precedence over the
+	// process environment, so env-only injection cannot move base URL/token.
+	// Persist the active provider into settings.json as well (fail-closed).
+	if err := syncSettings(name, p, token, cfg); err != nil {
+		return err
 	}
 	return nil
 }
@@ -111,9 +119,24 @@ func providerAdd(args []string) {
 		os.Exit(1)
 	}
 
+	// Connection keys are owned by ccc itself (--base-url flag and the
+	// keychain via `ccc token set`); storing them in provider env would
+	// shadow the base_url field and confuse settings sync.
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"} {
+		if _, ok := envMap[k]; ok {
+			fmt.Fprintf(os.Stderr, "--env %s is not allowed; use --base-url and `ccc token set %s <value>`\n", k, name)
+			os.Exit(1)
+		}
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if _, exists := cfg.Providers[name]; exists {
+		fmt.Fprintf(os.Stderr, "Provider %q already exists; remove it first to replace it.\n", name)
 		os.Exit(1)
 	}
 
@@ -148,7 +171,13 @@ func providerList() {
 		return
 	}
 
-	for name, p := range cfg.Providers {
+	names := make([]string, 0, len(cfg.Providers))
+	for k := range cfg.Providers {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := cfg.Providers[name]
 		marker := "  "
 		if name == cfg.DefaultProvider {
 			marker = "* "
@@ -189,6 +218,12 @@ func providerRemove(args []string) {
 	if err := saveConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Sweep the removed provider's keys from Claude Code settings.json so a
+	// direct `claude` run cannot keep using a provider that no longer exists.
+	if err := clearManagedSettings(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not clean settings.json: %v\n", err)
 	}
 	fmt.Printf("Provider %q removed.\n", name)
 }

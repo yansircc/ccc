@@ -12,7 +12,7 @@ func TestCompareVersion(t *testing.T) {
 		{"2.0", "1.9.9", 1},
 		{"1.9.9", "2.0", -1},
 		{"1.0", "1.0", 0},
-		{"1.0.0", "1.0", 1},   // numerically equal, but strings.Compare tiebreak: "1.0.0" > "1.0"
+		{"1.0.0", "1.0", 1},    // numerically equal, but strings.Compare tiebreak: "1.0.0" > "1.0"
 		{"v1.2.3", "1.2.3", 1}, // numerically equal, but strings.Compare tiebreak: "v" > "1"
 		{"v2.0.0", "v1.9.9", 1},
 		{"0.1", "0.2", -1},
@@ -36,10 +36,10 @@ func TestParseVersionPart(t *testing.T) {
 	}{
 		{[]string{"1", "2", "3"}, 0, 1},
 		{[]string{"1", "2", "3"}, 2, 3},
-		{[]string{"1", "2", "3"}, 5, 0},  // out of bounds
-		{[]string{"abc"}, 0, 0},           // non-numeric
-		{[]string{"42"}, 0, 42},           // valid int
-		{[]string{}, 0, 0},                // empty parts
+		{[]string{"1", "2", "3"}, 5, 0}, // out of bounds
+		{[]string{"abc"}, 0, 0},         // non-numeric
+		{[]string{"42"}, 0, 42},         // valid int
+		{[]string{}, 0, 0},              // empty parts
 	}
 
 	for _, tt := range tests {

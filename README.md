@@ -96,3 +96,21 @@ ccc --version              # Info-only, skip provider setup, pass through direct
 - Provider `args` are prepended to the claude command; `--safe` filters out `--dangerously-skip-permissions`
 - Provider `env` entries are set as environment variables before launch (e.g. model overrides, feature flags)
 - Info-only invocations (`--version`/`--help`/`update`/`doctor` etc.) skip provider and token resolution
+
+## Settings sync
+
+Recent Claude Code versions give `~/.claude/settings.json` env precedence over the
+process environment, so env injection alone cannot switch the base URL or token.
+On every non-info invocation ccc therefore **also persists the active provider
+into `~/.claude/settings.json`** (env section):
+
+- `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` are always managed by ccc
+- All `ANTHROPIC_DEFAULT_*` / `ANTHROPIC_MODEL` keys are swept and replaced with
+  the active provider's values, so stale model locks never leak between providers
+- Other settings (permissions, hooks, MCP, unrelated env) are preserved
+- Direct `claude` runs — wechat bridges, pawl, scripts — follow the same provider
+- The file is replaced atomically and the run aborts on any read/write error
+  (fail closed); set `CCC_NO_SYNC_SETTINGS=1` to disable syncing
+
+> Tokens are written into settings.json in plain text (same as cc-switch does);
+> they are also kept in the macOS Keychain as the source of truth.
