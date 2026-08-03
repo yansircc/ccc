@@ -17,10 +17,12 @@ func claudeSettingsPath() string {
 	return filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 }
 
-// clearManagedSettings removes every ccc-managed env key from Claude Code's
-// settings.json without writing new values. Used when a provider is removed
-// so direct `claude` runs cannot keep using the deleted provider's config.
-func clearManagedSettings(cfg *config) error {
+// clearManagedSettings removes the given provider env keys plus every
+// ANTHROPIC_DEFAULT_* model lock from Claude Code's settings.json, without
+// touching connection keys (ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN), which
+// belong to whichever provider is currently active. Used when a provider is
+// removed so direct `claude` runs cannot keep using its model overrides.
+func clearManagedSettings(removedEnvKeys []string) error {
 	if os.Getenv("CCC_NO_SYNC_SETTINGS") != "" {
 		return nil
 	}
@@ -44,7 +46,10 @@ func clearManagedSettings(cfg *config) error {
 		return nil
 	}
 	changed := false
-	for k := range cccManagedEnvKeys(cfg) {
+	for _, k := range removedEnvKeys {
+		if k == "ANTHROPIC_BASE_URL" || k == "ANTHROPIC_AUTH_TOKEN" {
+			continue
+		}
 		if _, ok := env[k]; ok {
 			delete(env, k)
 			changed = true

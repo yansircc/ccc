@@ -210,6 +210,13 @@ func providerRemove(args []string) {
 		os.Exit(1)
 	}
 
+	// Env keys this provider owns, so removal can sweep its model locks from
+	// settings.json without touching the active provider's connection keys.
+	removedKeys := make([]string, 0, len(cfg.Providers[name].Env))
+	for k := range cfg.Providers[name].Env {
+		removedKeys = append(removedKeys, k)
+	}
+
 	delete(cfg.Providers, name)
 	if cfg.DefaultProvider == name {
 		cfg.DefaultProvider = ""
@@ -220,9 +227,11 @@ func providerRemove(args []string) {
 		os.Exit(1)
 	}
 
-	// Sweep the removed provider's keys from Claude Code settings.json so a
-	// direct `claude` run cannot keep using a provider that no longer exists.
-	if err := clearManagedSettings(cfg); err != nil {
+	// Sweep the removed provider's model env keys from Claude Code settings.json
+	// so a direct `claude` run cannot keep using a provider that no longer
+	// exists. Connection keys are left alone: they belong to whichever provider
+	// is currently active and will be rewritten on the next ccc run.
+	if err := clearManagedSettings(removedKeys); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not clean settings.json: %v\n", err)
 	}
 	fmt.Printf("Provider %q removed.\n", name)
