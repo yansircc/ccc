@@ -70,7 +70,10 @@ ccc provider remove <name>
 
 ## Token Management
 
-Tokens are stored securely in macOS Keychain. Environment variable `CCC_<NAME>_TOKEN` takes priority over Keychain.
+Tokens are stored securely in macOS Keychain. Environment variable
+`CCC_<NORMALIZED_NAME>_TOKEN` takes priority over Keychain. Normalization
+uppercases ASCII letters and replaces every non-alphanumeric character with
+`_`, so `kimi-coding` resolves to `CCC_KIMI_CODING_TOKEN`.
 
 ```bash
 ccc token set <provider> <value>   # Store in Keychain

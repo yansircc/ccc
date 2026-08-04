@@ -110,6 +110,22 @@ func TestLoadConfig_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsTokenEnvironmentCollision(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	dir := filepath.Join(tmp, "ccc")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"providers":{"a-b":{"base_url":"https://one.example"},"a_b":{"base_url":"https://two.example"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("token environment collision was accepted")
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)

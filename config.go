@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 type providerConfig struct {
@@ -42,11 +44,34 @@ func loadConfig() (*config, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]providerConfig)
 	}
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+func validateConfig(cfg *config) error {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	owners := make(map[string]string, len(names))
+	for _, name := range names {
+		environment := tokenEnvironmentName(name)
+		if owner, exists := owners[environment]; exists {
+			return fmt.Errorf("providers %q and %q resolve to the same token environment %s", owner, name, environment)
+		}
+		owners[environment] = name
+	}
+	return nil
 }
 
 // saveConfig writes config to disk, creating directories as needed.
 func saveConfig(cfg *config) error {
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
 	p := configPath()
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		return err

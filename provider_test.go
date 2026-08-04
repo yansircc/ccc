@@ -13,6 +13,26 @@ func TestResolveToken_EnvVar(t *testing.T) {
 	}
 }
 
+func TestTokenEnvironmentNameNormalizesProviderIdentity(t *testing.T) {
+	for input, want := range map[string]string{
+		"acme":        "CCC_ACME_TOKEN",
+		"kimi-coding": "CCC_KIMI_CODING_TOKEN",
+		"a.b/c d":     "CCC_A_B_C_D_TOKEN",
+		"模型-1":        "CCC____1_TOKEN",
+	} {
+		if got := tokenEnvironmentName(input); got != want {
+			t.Errorf("tokenEnvironmentName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestResolveToken_NormalizedEnvVar(t *testing.T) {
+	t.Setenv("CCC_KIMI_CODING_TOKEN", "env-token-456")
+	if got := resolveToken("kimi-coding"); got != "env-token-456" {
+		t.Errorf("resolveToken(kimi-coding) = %q, want normalized env token", got)
+	}
+}
+
 func TestResolveToken_EnvVarEmpty_NoKeychain(t *testing.T) {
 	t.Setenv("CCC_ACME_TOKEN", "")
 	// Keychain won't have an entry in test env, so we expect ""

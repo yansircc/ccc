@@ -7,10 +7,24 @@ import (
 	"strings"
 )
 
+// tokenEnvironmentName is the only projection from provider identity to its
+// shell-compatible token environment variable.
+func tokenEnvironmentName(name string) string {
+	var normalized strings.Builder
+	for _, character := range strings.ToUpper(name) {
+		if character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' {
+			normalized.WriteRune(character)
+		} else {
+			normalized.WriteByte('_')
+		}
+	}
+	return "CCC_" + normalized.String() + "_TOKEN"
+}
+
 // resolveToken resolves a provider's token.
-// Convention: env var CCC_<UPPER(name)>_TOKEN > Keychain.
+// Convention: normalized environment variable > Keychain.
 func resolveToken(name string) string {
-	envKey := "CCC_" + strings.ToUpper(name) + "_TOKEN"
+	envKey := tokenEnvironmentName(name)
 	if v := os.Getenv(envKey); v != "" {
 		return v
 	}
@@ -29,7 +43,7 @@ func setupProvider(name string, cfg *config) error {
 
 	token := resolveToken(name)
 	if token == "" {
-		envKey := "CCC_" + strings.ToUpper(name) + "_TOKEN"
+		envKey := tokenEnvironmentName(name)
 		return fmt.Errorf("%s is empty and no keychain entry for %q\n  Run: ccc token set %s <value>", envKey, name, name)
 	}
 
