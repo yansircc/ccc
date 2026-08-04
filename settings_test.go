@@ -30,6 +30,28 @@ func TestClaudeSettingsPath_Fallback(t *testing.T) {
 	}
 }
 
+func TestReplaceSettings_CreatesPrivateParent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new", ".claude", "settings.json")
+	if err := replaceSettings(path, []byte("{}\n")); err != nil {
+		t.Fatalf("replaceSettings: %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat settings parent: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0700 {
+		t.Errorf("settings parent mode = %04o, want 0700", got)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat settings: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0600 {
+		t.Errorf("settings mode = %04o, want 0600", got)
+	}
+}
+
 func TestCCCManagedEnvKeys(t *testing.T) {
 	cfg := &config{
 		Providers: map[string]providerConfig{

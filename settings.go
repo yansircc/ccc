@@ -11,7 +11,11 @@ import (
 // replaceSettings atomically replaces a Claude settings file without ever
 // creating a predictable or group-readable token-bearing temporary file.
 func replaceSettings(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings.json.*")
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".settings.json.*")
 	if err != nil {
 		return err
 	}
