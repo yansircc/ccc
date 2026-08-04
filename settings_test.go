@@ -106,6 +106,34 @@ func TestSyncSettings_PreservesAndSwitches(t *testing.T) {
 	if doc["permissions"].(map[string]any)["defaultMode"] != "dontAsk" {
 		t.Error("permissions section not preserved")
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat settings: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Errorf("settings mode = %04o, want 0600", got)
+	}
+}
+
+func TestClearManagedSettings_WritesPrivateFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", tmp)
+	t.Setenv("CCC_NO_SYNC_SETTINGS", "")
+
+	path := filepath.Join(tmp, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"env":{"SECRET":"value"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearManagedSettings([]string{"SECRET"}); err != nil {
+		t.Fatalf("clearManagedSettings: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat settings: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Errorf("settings mode = %04o, want 0600", got)
+	}
 }
 
 // A broken settings.json must abort (fail closed), not clobber the file.

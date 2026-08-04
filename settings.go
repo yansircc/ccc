@@ -8,6 +8,34 @@ import (
 	"strings"
 )
 
+// replaceSettings atomically replaces a Claude settings file without ever
+// creating a predictable or group-readable token-bearing temporary file.
+func replaceSettings(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings.json.*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
 // claudeSettingsPath returns the path to Claude Code's user settings.json.
 // Like Claude Code itself, it honors CLAUDE_CONFIG_DIR when set.
 func claudeSettingsPath() string {
@@ -70,11 +98,10 @@ func clearManagedSettings(removedEnvKeys []string) error {
 		return err
 	}
 	out = append(out, '\n')
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
+	if err := replaceSettings(path, out); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return nil
 }
 
 // cccManagedEnvKeys returns the env keys ccc owns inside settings.json:
@@ -150,11 +177,7 @@ func syncSettings(providerName string, p providerConfig, token string, cfg *conf
 	}
 	data = append(data, '\n')
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return fmt.Errorf("write settings %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceSettings(path, data); err != nil {
 		return fmt.Errorf("replace settings %s: %w", path, err)
 	}
 	return nil
