@@ -34,32 +34,38 @@ func resolveToken(name string) string {
 	return ""
 }
 
-// setupProvider configures environment variables for the chosen provider.
-func setupProvider(name string, cfg *config) error {
-	p, ok := cfg.Providers[name]
+// environmentFor returns the environment ccc adds to this run.
+//
+// The transport of a relay lives here — in the environment of the one process
+// ccc launches — and nowhere else: settings.json is scrubbed first, because
+// Claude Code merges settings.env over the process environment and a pinned
+// base URL would win. applied is "" for an official run, which adds ccc's
+// standing env and no transport at all.
+func environmentFor(cfg *config, applied string) (map[string]string, error) {
+	environment := make(map[string]string, len(cfg.Env)+4)
+	for key, value := range cfg.Env {
+		environment[key] = value
+	}
+	if applied == "" {
+		return environment, nil
+	}
+
+	provider, ok := cfg.Providers[applied]
 	if !ok {
-		return fmt.Errorf("provider %q not found in config (%s)", name, configPath())
+		return nil, fmt.Errorf("provider %q not found in config (%s)", applied, configPath())
 	}
-
-	token := resolveToken(name)
+	token := resolveToken(applied)
 	if token == "" {
-		envKey := tokenEnvironmentName(name)
-		return fmt.Errorf("%s is empty and no keychain entry for %q\n  Run: ccc token set %s <value>", envKey, name, name)
+		envKey := tokenEnvironmentName(applied)
+		return nil, fmt.Errorf("%s is empty and no keychain entry for %q\n  Run: ccc token set %s <value>", envKey, applied, applied)
 	}
 
-	os.Setenv("ANTHROPIC_BASE_URL", p.BaseURL)
-	os.Setenv("ANTHROPIC_AUTH_TOKEN", token)
-	for k, v := range p.Env {
-		os.Setenv(k, v)
+	environment["ANTHROPIC_BASE_URL"] = provider.BaseURL
+	environment["ANTHROPIC_AUTH_TOKEN"] = token
+	for key, value := range provider.Env {
+		environment[key] = value
 	}
-
-	// Recent Claude Code versions give settings.json env precedence over the
-	// process environment, so env-only injection cannot move base URL/token.
-	// Persist the active provider into settings.json as well (fail-closed).
-	if err := syncSettings(name, p, token, cfg); err != nil {
-		return err
-	}
-	return nil
+	return environment, nil
 }
 
 // handleProviderCommand handles the "ccc provider" subcommand.
@@ -241,11 +247,9 @@ func providerRemove(args []string) {
 		os.Exit(1)
 	}
 
-	// Sweep the removed provider's model env keys from Claude Code settings.json
-	// so a direct `claude` run cannot keep using a provider that no longer
-	// exists. Connection keys are left alone: they belong to whichever provider
-	// is currently active and will be rewritten on the next ccc run.
-	if err := clearManagedSettings(removedKeys); err != nil {
+	// Sweep the removed provider's keys from Claude Code settings.json so a
+	// direct `claude` run cannot keep using a provider that no longer exists.
+	if err := scrubSettings(cfg, removedKeys...); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not clean settings.json: %v\n", err)
 	}
 	fmt.Printf("Provider %q removed.\n", name)

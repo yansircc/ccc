@@ -14,8 +14,15 @@ type providerConfig struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
+// config is ~/.config/ccc/config.json.
+//
+// DefaultProvider names the relay `ccc --relay` uses; it is never the default
+// run. Args and Env are ccc's standing arguments and environment — they apply
+// to an official run and a relay run alike.
 type config struct {
 	DefaultProvider string                    `json:"default_provider"`
+	Args            []string                  `json:"args,omitempty"`
+	Env             map[string]string         `json:"env,omitempty"`
 	Providers       map[string]providerConfig `json:"providers"`
 }
 
@@ -44,6 +51,9 @@ func loadConfig() (*config, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]providerConfig)
 	}
+	if cfg.Env == nil {
+		cfg.Env = make(map[string]string)
+	}
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -51,6 +61,12 @@ func loadConfig() (*config, error) {
 }
 
 func validateConfig(cfg *config) error {
+	for key := range cfg.Env {
+		if key == "ANTHROPIC_BASE_URL" || key == "ANTHROPIC_AUTH_TOKEN" {
+			return fmt.Errorf("%s belongs to a provider: use its base_url and `ccc token set <provider> <value>`", key)
+		}
+	}
+
 	names := make([]string, 0, len(cfg.Providers))
 	for name := range cfg.Providers {
 		names = append(names, name)
@@ -63,6 +79,18 @@ func validateConfig(cfg *config) error {
 			return fmt.Errorf("providers %q and %q resolve to the same token environment %s", owner, name, environment)
 		}
 		owners[environment] = name
+
+		// A standing env key stays in settings.json, and settings.env beats the
+		// process environment: a provider that disagreed with it would be
+		// silently overruled, so the two must say the same thing.
+		for key, value := range cfg.Providers[name].Env {
+			if hardEnvKey(key) {
+				continue
+			}
+			if standing, exists := cfg.Env[key]; exists && standing != value {
+				return fmt.Errorf("provider %q sets %s=%q but the standing env says %q", name, key, value, standing)
+			}
+		}
 	}
 	return nil
 }

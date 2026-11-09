@@ -188,3 +188,78 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfig_StandingArgsAndEnv(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	dir := filepath.Join(tmp, "ccc")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{
+  "default_provider": "relay",
+  "args": ["--dangerously-skip-permissions"],
+  "env": {"DISABLE_TELEMETRY": "1"},
+  "providers": {"relay": {"base_url": "https://relay.example"}}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if len(cfg.Args) != 1 || cfg.Args[0] != "--dangerously-skip-permissions" {
+		t.Errorf("Args = %v, want the standing arg", cfg.Args)
+	}
+	if cfg.Env["DISABLE_TELEMETRY"] != "1" {
+		t.Errorf("Env = %v, want DISABLE_TELEMETRY=1", cfg.Env)
+	}
+
+	// Round-trip: standing args and env survive a save.
+	if err := saveConfig(cfg); err != nil {
+		t.Fatalf("saveConfig() error = %v", err)
+	}
+	reloaded, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() after save error = %v", err)
+	}
+	if len(reloaded.Args) != 1 || reloaded.Env["DISABLE_TELEMETRY"] != "1" {
+		t.Errorf("standing args/env lost on save: %+v", reloaded)
+	}
+}
+
+func TestValidateConfig_RejectsTransportInStandingEnv(t *testing.T) {
+	cfg := &config{
+		Env:       map[string]string{"ANTHROPIC_BASE_URL": "https://relay.example"},
+		Providers: map[string]providerConfig{},
+	}
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("a standing base URL was accepted")
+	}
+}
+
+func TestValidateConfig_RejectsProviderDisagreeingWithStandingEnv(t *testing.T) {
+	cfg := &config{
+		Env: map[string]string{"DISABLE_TELEMETRY": "1"},
+		Providers: map[string]providerConfig{
+			"relay": {BaseURL: "https://relay.example", Env: map[string]string{"DISABLE_TELEMETRY": "0"}},
+		},
+	}
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("a provider contradicting the standing env was accepted")
+	}
+
+	// Agreement is fine, and model keys are the provider's own even when the
+	// standing env names a model.
+	cfg.Providers["relay"] = providerConfig{
+		BaseURL: "https://relay.example",
+		Env:     map[string]string{"DISABLE_TELEMETRY": "1", "ANTHROPIC_MODEL": "relay-model"},
+	}
+	cfg.Env["ANTHROPIC_MODEL"] = "official-model"
+	if err := validateConfig(cfg); err != nil {
+		t.Errorf("validateConfig() = %v, want nil", err)
+	}
+}

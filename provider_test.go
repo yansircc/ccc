@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 )
 
@@ -42,57 +41,77 @@ func TestResolveToken_EnvVarEmpty_NoKeychain(t *testing.T) {
 	}
 }
 
-func TestSetupProvider_Success(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+func TestEnvironmentFor_RelayCarriesTransport(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("CCC_MYCLOUD_TOKEN", "secret-tok")
-	// Clear env vars that setupProvider will set
-	t.Setenv("ANTHROPIC_BASE_URL", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("CUSTOM_HEADER", "")
 
 	cfg := &config{
+		Env: map[string]string{"STANDING": "1", "SHARED": "standing"},
 		Providers: map[string]providerConfig{
 			"mycloud": {
 				BaseURL: "https://mycloud.example.com/api",
-				Env:     map[string]string{"CUSTOM_HEADER": "X-Custom: yes"},
+				Env:     map[string]string{"CUSTOM_HEADER": "X-Custom: yes", "SHARED": "provider"},
 			},
 		},
 	}
 
-	err := setupProvider("mycloud", cfg)
+	environment, err := environmentFor(cfg, "mycloud")
 	if err != nil {
-		t.Fatalf("setupProvider() error = %v", err)
+		t.Fatalf("environmentFor() error = %v", err)
 	}
 
-	if got := os.Getenv("ANTHROPIC_BASE_URL"); got != "https://mycloud.example.com/api" {
-		t.Errorf("ANTHROPIC_BASE_URL = %q, want %q", got, "https://mycloud.example.com/api")
+	want := map[string]string{
+		"ANTHROPIC_BASE_URL":   "https://mycloud.example.com/api",
+		"ANTHROPIC_AUTH_TOKEN": "secret-tok",
+		"CUSTOM_HEADER":        "X-Custom: yes",
+		"STANDING":             "1",
+		"SHARED":               "provider",
 	}
-	if got := os.Getenv("ANTHROPIC_AUTH_TOKEN"); got != "secret-tok" {
-		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want %q", got, "secret-tok")
+	if len(environment) != len(want) {
+		t.Fatalf("environment = %v, want %v", environment, want)
 	}
-	if got := os.Getenv("CUSTOM_HEADER"); got != "X-Custom: yes" {
-		t.Errorf("CUSTOM_HEADER = %q, want %q", got, "X-Custom: yes")
+	for key, value := range want {
+		if environment[key] != value {
+			t.Errorf("environment[%s] = %q, want %q", key, environment[key], value)
+		}
 	}
 }
 
-func TestSetupProvider_NotFound(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+// An official run adds ccc's standing env and no transport whatsoever.
+func TestEnvironmentFor_OfficialAddsNoTransport(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cfg := &config{
-		Providers: map[string]providerConfig{},
+		Env:       map[string]string{"DISABLE_TELEMETRY": "1"},
+		Providers: map[string]providerConfig{"relay": {BaseURL: "https://relay.example"}},
 	}
-
-	err := setupProvider("nonexist", cfg)
-	if err == nil {
-		t.Fatal("setupProvider() expected error for missing provider, got nil")
+	environment, err := environmentFor(cfg, "")
+	if err != nil {
+		t.Fatalf("environmentFor() error = %v", err)
+	}
+	if _, ok := environment["ANTHROPIC_BASE_URL"]; ok {
+		t.Error("official run carries a base URL")
+	}
+	if _, ok := environment["ANTHROPIC_AUTH_TOKEN"]; ok {
+		t.Error("official run carries a token")
+	}
+	if environment["DISABLE_TELEMETRY"] != "1" {
+		t.Error("standing env was dropped from an official run")
 	}
 }
 
-func TestSetupProvider_EmptyToken(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+func TestEnvironmentFor_NotFound(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg := &config{Providers: map[string]providerConfig{}}
+
+	if _, err := environmentFor(cfg, "nonexist"); err == nil {
+		t.Fatal("environmentFor() expected error for missing provider, got nil")
+	}
+}
+
+func TestEnvironmentFor_EmptyToken(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("CCC_GHOST_TOKEN", "")
 
 	cfg := &config{
@@ -101,8 +120,7 @@ func TestSetupProvider_EmptyToken(t *testing.T) {
 		},
 	}
 
-	err := setupProvider("ghost", cfg)
-	if err == nil {
-		t.Fatal("setupProvider() expected error for empty token, got nil")
+	if _, err := environmentFor(cfg, "ghost"); err == nil {
+		t.Fatal("environmentFor() expected error for empty token, got nil")
 	}
 }

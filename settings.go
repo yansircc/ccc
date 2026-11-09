@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -49,51 +50,111 @@ func claudeSettingsPath() string {
 	return filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 }
 
-// clearManagedSettings removes the given provider env keys plus every
-// ANTHROPIC_DEFAULT_* model lock from Claude Code's settings.json, without
-// touching connection keys (ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN), which
-// belong to whichever provider is currently active. Used when a provider is
-// removed so direct `claude` runs cannot keep using its model overrides.
-func clearManagedSettings(removedEnvKeys []string) error {
+// readSettings parses Claude Code's settings.json, treating a missing file as
+// an empty document. A file that is not JSON is an error: ccc refuses to guess.
+func readSettings(path string) (map[string]any, error) {
+	doc := map[string]any{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return doc, nil
+		}
+		return nil, fmt.Errorf("read settings %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("settings %s is not valid JSON: %w", path, err)
+	}
+	return doc, nil
+}
+
+// hardEnvKeys are the keys ccc owns in every mode: they are what decides where
+// a request goes and which model name it names.
+func hardEnvKey(key string) bool {
+	switch key {
+	case "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL":
+		return true
+	default:
+		return false
+	}
+}
+
+// cccEnvKeys returns the env keys ccc owns inside settings.json: the transport
+// keys, and every key a provider declares.
+//
+// The top-level env is subtracted: it is the user's standing preference, the
+// same in every mode, so it may stay in settings.json — scrubbing it would only
+// take it away from a plain `claude` run. A provider's env is this run's
+// transport, so it may not linger there.
+func cccEnvKeys(cfg *config) map[string]bool {
+	keys := map[string]bool{}
+	for _, provider := range cfg.Providers {
+		for key := range provider.Env {
+			keys[key] = true
+		}
+	}
+	for key := range cfg.Env {
+		if !hardEnvKey(key) {
+			delete(keys, key)
+		}
+	}
+	for _, key := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
+		keys[key] = true
+	}
+	return keys
+}
+
+// cccOwnsSettingsKey reports whether ccc may remove this key from settings.json.
+// Provider model locks live in the ANTHROPIC_DEFAULT_* namespace and are swept
+// wholesale, so a removed provider's overrides never linger.
+func cccOwnsSettingsKey(key string, owned map[string]bool) bool {
+	return owned[key] || strings.HasPrefix(key, "ANTHROPIC_DEFAULT_")
+}
+
+// scrubSettings removes every env key ccc owns from Claude Code's
+// settings.json.
+//
+// Why: Claude Code merges settings.env OVER the process environment, so a base
+// URL parked in settings.json beats anything ccc injects — and it would also
+// silently keep a plain `claude` run on the relay. ccc therefore keeps no
+// transport in settings.json at all: a relay lives in the environment of the
+// one process it launches, and an official run inherits nothing. This is what
+// makes `ccc` (and plain `claude`) official by default.
+//
+// It is fail-closed: a settings file that cannot be read or parsed aborts the
+// run before claude starts, and the file is replaced atomically, private.
+// Set CCC_NO_SYNC_SETTINGS=1 to keep ccc's hands off the file entirely.
+func scrubSettings(cfg *config, extraKeys ...string) error {
 	if os.Getenv("CCC_NO_SYNC_SETTINGS") != "" {
 		return nil
 	}
 
 	path := claudeSettingsPath()
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	doc, err := readSettings(path)
 	if err != nil {
 		return err
 	}
-
-	doc := map[string]any{}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("settings %s is not valid JSON: %w", path, err)
-	}
-
 	env, _ := doc["env"].(map[string]any)
 	if env == nil {
 		return nil
 	}
-	changed := false
-	for _, k := range removedEnvKeys {
-		if k == "ANTHROPIC_BASE_URL" || k == "ANTHROPIC_AUTH_TOKEN" {
-			continue
+
+	owned := cccEnvKeys(cfg)
+	for _, key := range extraKeys {
+		if !hardEnvKey(key) {
+			if _, standing := cfg.Env[key]; standing {
+				continue
+			}
 		}
-		if _, ok := env[k]; ok {
-			delete(env, k)
-			changed = true
+		owned[key] = true
+	}
+	removed := 0
+	for key := range env {
+		if cccOwnsSettingsKey(key, owned) {
+			delete(env, key)
+			removed++
 		}
 	}
-	for k := range env {
-		if strings.HasPrefix(k, "ANTHROPIC_DEFAULT_") {
-			delete(env, k)
-			changed = true
-		}
-	}
-	if !changed {
+	if removed == 0 {
 		return nil
 	}
 
@@ -103,86 +164,35 @@ func clearManagedSettings(removedEnvKeys []string) error {
 	}
 	out = append(out, '\n')
 	if err := replaceSettings(path, out); err != nil {
-		return err
-	}
-	return nil
-}
-
-// cccManagedEnvKeys returns the env keys ccc owns inside settings.json:
-// the connection keys plus every key referenced by any provider env.
-// On provider switch, all managed keys are removed before writing the
-// active provider's values, so stale overrides (e.g. a previous provider's
-// model locks) never leak into the next provider.
-func cccManagedEnvKeys(cfg *config) map[string]bool {
-	keys := map[string]bool{
-		"ANTHROPIC_BASE_URL":   true,
-		"ANTHROPIC_AUTH_TOKEN": true,
-		"ANTHROPIC_MODEL":      true,
-	}
-	for _, p := range cfg.Providers {
-		for k := range p.Env {
-			keys[k] = true
-		}
-	}
-	return keys
-}
-
-// syncSettings persists the active provider's connection environment into
-// Claude Code's user settings.json.
-//
-// Why: recent Claude Code versions give settings.json env precedence over the
-// process environment. ccc's env injection alone therefore cannot move the
-// base URL or auth token — a base URL pinned in settings.json always wins.
-// Writing settings.json makes both `ccc` runs and direct `claude` invocations
-// (wechat bridges, pawl, scripts) follow the same provider, with the same
-// semantics cc-switch users already know.
-//
-// It is fail-closed: any read/write error aborts the run before claude starts,
-// and the file is replaced atomically. Set CCC_NO_SYNC_SETTINGS=1 to disable.
-func syncSettings(providerName string, p providerConfig, token string, cfg *config) error {
-	if os.Getenv("CCC_NO_SYNC_SETTINGS") != "" {
-		return nil
-	}
-
-	path := claudeSettingsPath()
-	doc := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &doc); err != nil {
-			return fmt.Errorf("settings %s is not valid JSON: %w", path, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read settings %s: %w", path, err)
-	}
-
-	env, _ := doc["env"].(map[string]any)
-	if env == nil {
-		env = map[string]any{}
-	}
-	for k := range cccManagedEnvKeys(cfg) {
-		delete(env, k)
-	}
-	// Provider model locks live in the ANTHROPIC_DEFAULT_* namespace; sweep
-	// them wholesale so a removed provider's overrides never linger.
-	for k := range env {
-		if strings.HasPrefix(k, "ANTHROPIC_DEFAULT_") {
-			delete(env, k)
-		}
-	}
-	env["ANTHROPIC_BASE_URL"] = p.BaseURL
-	env["ANTHROPIC_AUTH_TOKEN"] = token
-	for k, v := range p.Env {
-		env[k] = v
-	}
-	doc["env"] = env
-
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	if err := replaceSettings(path, data); err != nil {
 		return fmt.Errorf("replace settings %s: %w", path, err)
 	}
 	return nil
+}
+
+// scrubPreview lists the keys scrubSettings would remove, sorted, without
+// touching the file. Used by --print-plan.
+func scrubPreview(cfg *config) ([]string, error) {
+	doc, err := readSettings(claudeSettingsPath())
+	if err != nil {
+		return nil, err
+	}
+	env, _ := doc["env"].(map[string]any)
+	owned := cccEnvKeys(cfg)
+	var stale []string
+	for key := range env {
+		if cccOwnsSettingsKey(key, owned) {
+			stale = append(stale, key)
+		}
+	}
+	sort.Strings(stale)
+	return stale, nil
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
